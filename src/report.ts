@@ -1,4 +1,4 @@
-import type { PqEvent, Report } from './analyze.js';
+import type { DaySummary, PqEvent, Report } from './analyze.js';
 
 const dur = (seconds: number) => {
   if (seconds < 60) return `${seconds} s`;
@@ -24,6 +24,31 @@ function header(r: Report): string[] {
   ];
 }
 
+const dayCells = (r: Report, d: DaySummary) => [
+  d.date,
+  String(d.samples),
+  String(d.interruption),
+  String(d.sag),
+  String(d.swell),
+  String(d.minV),
+  String(d.maxV),
+  `${d.inBandPct}%`,
+  ...(r.phases === 3 ? [d.unbalanceP95 === null ? '-' : `${d.unbalanceP95}%`] : []),
+  ...(r.frequency ? [String(d.freqOutside ?? 0)] : []),
+];
+const dayHeads = (r: Report) => [
+  'Date',
+  'Samples',
+  'Interr.',
+  'Sags',
+  'Swells',
+  'Min V',
+  'Max V',
+  'In band',
+  ...(r.phases === 3 ? ['Unbal. p95'] : []),
+  ...(r.frequency ? ['Freq out'] : []),
+];
+
 export function textReport(r: Report): string {
   const out = header(r);
   out.push('', `Events: ${r.eventCounts.interruption} interruption, ${r.eventCounts.sag} sag, ${r.eventCounts.swell} swell`);
@@ -37,6 +62,14 @@ export function textReport(r: Report): string {
   out.push('', 'Voltage per channel (all samples):');
   for (const c of r.channels) {
     out.push(`  ${c.channel}: min ${c.min} V (${c.minAt}), mean ${c.mean} V, max ${c.max} V (${c.maxAt}), in band ${c.inBandPct}%`);
+  }
+  if (r.days.length > 1) {
+    const rows = [dayHeads(r), ...r.days.map((d) => dayCells(r, d))];
+    const widths = rows[0].map((_, k) => Math.max(...rows.map((row) => row[k].length)));
+    out.push('', 'Per day (events counted on the day they start):');
+    for (const row of rows) {
+      out.push(`  ${row.map((c, k) => (k === 0 ? c.padEnd(widths[k]) : c.padStart(widths[k]))).join('  ')}`);
+    }
   }
   if (r.unbalance) {
     const u = r.unbalance;
@@ -84,6 +117,12 @@ export function markdownReport(r: Report): string {
   out.push('', '## Voltage per channel', '', '| Channel | Min (V) | Mean (V) | Max (V) | In band |', '| --- | --- | --- | --- | --- |');
   for (const c of r.channels) {
     out.push(`| ${cell(c.channel)} | ${c.min} | ${c.mean} | ${c.max} | ${c.inBandPct}% |`);
+  }
+  if (r.days.length > 1) {
+    const heads = dayHeads(r);
+    out.push('', '## Per day', '', 'Events are counted on the day they start.', '', `| ${heads.join(' | ')} |`,
+      `| ${heads.map(() => '---').join(' | ')} |`);
+    for (const d of r.days) out.push(`| ${dayCells(r, d).map(cell).join(' | ')} |`);
   }
   if (r.unbalance) {
     const u = r.unbalance;
