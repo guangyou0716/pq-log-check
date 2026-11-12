@@ -60,4 +60,25 @@ describe('parseLog', () => {
     expect(() => parseLog('timestamp,a,b\n', { voltColumns: ['a', 'b'] })).toThrow(/one voltage column .* or three/);
     expect(() => parseLog('timestamp,a\n', { voltColumns: ['a', 'a', 'a'] })).toThrow(/different/);
   });
+
+  it('reads optional current columns; an empty current cell makes that row missing', () => {
+    const log = parseLog('timestamp,v1,v2,v3,IA,IB,IC\n2026-01-01 00:00,230,230,230,10,11,12\n2026-01-01 00:01,230,230,230,10,,12\n', {
+      currentColumns: ['ia', 'ib', 'ic'],
+    });
+    expect(log.currentChannels).toEqual(['IA', 'IB', 'IC']);
+    expect(log.amps).toEqual([[10, 11, 12], null]);
+    expect(parseLog('timestamp,v1,v2,v3,IA\n2026-01-01 00:00,230,230,230,1\n').amps).toBeUndefined();
+  });
+
+  it('checks current columns', () => {
+    const text = 'timestamp,v1,v2,v3,i1,i2,i3\n2026-01-01 00:00,230,230,230,1,2,x\n';
+    expect(() => parseLog(text, { currentColumns: ['i1', 'i2'] })).toThrow(/three current columns/);
+    expect(() => parseLog('timestamp,v\n', { voltColumns: ['v'], currentColumns: ['i1', 'i2', 'i3'] })).toThrow(/three-phase/);
+    expect(() => parseLog(text, { currentColumns: ['i1', 'I1', 'i3'] })).toThrow(/different/);
+    expect(() => parseLog(text, { currentColumns: ['i1', 'v2', 'i3'] })).toThrow(/"v2" is also used/);
+    expect(() => parseLog(text, { currentColumns: ['i1', 'i2', 'i4'] })).toThrow(/no current column "i4"/);
+    expect(() => parseLog(text, { currentColumns: ['i1', 'i2', 'i3'] })).toThrow(/Row 2: i3 "x" is not a number/);
+    expect(() => parseLog('timestamp,v1,v2,v3,i1,i2,i3\n2026-01-01 00:00,230,230,230,,2,x\n', { currentColumns: ['i1', 'i2', 'i3'] }))
+      .toThrow(/Row 2: i3 "x"/);
+  });
 });

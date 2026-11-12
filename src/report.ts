@@ -1,4 +1,4 @@
-import type { DaySummary, EventType, PqEvent, Report } from './analyze.js';
+import type { CurrentUnbalanceStats, DaySummary, EventType, PqEvent, Report } from './analyze.js';
 
 const dur = (seconds: number) => {
   if (seconds < 60) return `${seconds} s`;
@@ -49,6 +49,14 @@ const dayHeads = (r: Report) => [
   ...(r.frequency ? ['Freq out'] : []),
 ];
 
+const currentLimit = (c: CurrentUnbalanceStats) =>
+  c.limitPct === null
+    ? 'no limit given (report only)'
+    : `limit ${c.limitPct}%: ${c.samplesAboveLimit} sample(s) above, ${c.overLimit ? 'OVER LIMIT' : 'ok'}`;
+const currentLeftOut = (c: CurrentUnbalanceStats) =>
+  `${c.samples} samples; left out: ${c.flaggedSamples} flagged, ${c.lowLoadSamples} low load ` +
+  `(average < ${c.minAverageA} A or zero), ${c.missingSamples} with an empty current cell`;
+
 const bucketTypes: EventType[] = ['interruption', 'sag', 'swell'];
 const bucketHeads = ['Type', '< 1 min', '1-10 min', '>= 10 min', 'Open'];
 const bucketRows = (r: Report) =>
@@ -98,6 +106,12 @@ export function textReport(r: Report): string {
       `  mean ${u.mean}%, 95th percentile ${u.p95}%, max ${u.max}%${u.maxAt ? ` (${u.maxAt})` : ''}; ` +
         `limit ${u.limitPct}%: ${u.samplesAboveLimit} sample(s) above, ${u.overLimit ? 'OVER LIMIT' : 'ok'}`,
     );
+  }
+  if (r.current) {
+    const c = r.current;
+    out.push('', `Current unbalance (${c.method}), ${currentLeftOut(c)}:`);
+    for (const ch of c.channels) out.push(`  ${ch.channel}: min ${ch.min} A, mean ${ch.mean} A, max ${ch.max} A`);
+    out.push(`  mean ${c.mean}%, 95th percentile ${c.p95}%, max ${c.max}%${c.maxAt ? ` (${c.maxAt})` : ''}; ${currentLimit(c)}`);
   }
   if (r.frequency) {
     const f = r.frequency;
@@ -158,6 +172,15 @@ export function markdownReport(r: Report): string {
       '| --- | --- | --- | --- | --- | --- |',
       `| ${u.mean}% | ${u.p95}% | ${u.max}% | ${u.limitPct}% | ${u.samplesAboveLimit} | ${u.overLimit ? 'over limit' : 'ok'} |`,
     );
+  }
+  if (r.current) {
+    const c = r.current;
+    out.push('', '## Current unbalance', '', `${c.method}; ${currentLeftOut(c)}.`, '',
+      '| Phase | Min (A) | Mean (A) | Max (A) |', '| --- | --- | --- | --- |');
+    for (const ch of c.channels) out.push(`| ${cell(ch.channel)} | ${ch.min} | ${ch.mean} | ${ch.max} |`);
+    out.push('', '| Mean | 95th percentile | Max | Limit | Samples above | Result |', '| --- | --- | --- | --- | --- | --- |',
+      `| ${c.mean}% | ${c.p95}% | ${c.max}% | ${c.limitPct === null ? '-' : `${c.limitPct}%`} | ${c.samplesAboveLimit ?? '-'} | ` +
+        `${c.limitPct === null ? 'report only' : c.overLimit ? 'over limit' : 'ok'} |`);
   }
   if (r.frequency) {
     const f = r.frequency;

@@ -29,23 +29,24 @@ for (const bin of [cli, link]) {
 console.log('smoke: ok example (direct and via symlink) 1 interruption, 2 sags, 1 swell, 1 gap, exit 1');
 
 // One year of 1-minute three-phase line-line samples (525,600 rows), balanced except one sag.
-const rows = ['timestamp,vab,vbc,vca,freq'];
+const rows = ['timestamp,vab,vbc,vca,freq,ia,ib,ic'];
 const base = Date.UTC(2026, 0, 1);
 for (let i = 0; i < 525600; i++) {
   const t = new Date(base + i * 60000).toISOString().slice(0, 19);
   const dip = i >= 100000 && i < 100003 ? 300 : 400;
-  rows.push(`${t}Z,${dip},${400 + (i % 3)},${401 - (i % 2)},${50 + (i % 5) / 100}`);
+  rows.push(`${t}Z,${dip},${400 + (i % 3)},${401 - (i % 2)},${50 + (i % 5) / 100},${i % 1440 < 60 ? '0,0,0' : '105,100,95'}`);
 }
 const big = join(dir, 'year.csv');
 writeFileSync(big, `${rows.join('\n')}\n`);
 const started = Date.now();
-const res = run(cli, [big, '--nominal', '400', '--line-to-line', '--columns', 'vab,vbc,vca', '--json']);
+const res = run(cli, [big, '--nominal', '400', '--line-to-line', '--columns', 'vab,vbc,vca', '--current-columns', 'ia,ib,ic', '--json']);
 const data = res.stdout ? JSON.parse(res.stdout) : {};
 if (res.status !== 1 || data.events?.length !== 1 || data.events[0].durationS !== 180 || data.unbalance?.overLimit !== false || data.frequency?.max !== 50.04 ||
-  data.days?.length !== 365 || data.days.reduce((t, d) => t + d.samples, 0) !== 525600 || data.days.filter((d) => d.sag).length !== 1) {
+  data.days?.length !== 365 || data.days.reduce((t, d) => t + d.samples, 0) !== 525600 || data.days.filter((d) => d.sag).length !== 1 ||
+  data.current?.lowLoadSamples !== 365 * 60 || data.current?.flaggedSamples !== 3 || data.current?.p95 !== 5 || data.current?.overLimit !== false) {
   fail(`year log: status ${res.status} ${JSON.stringify(data.eventCounts)} ${res.stderr}`);
 }
-console.log(`smoke: ok one-year 1-min line-line log (525600 rows) in ${Date.now() - started} ms, 1 sag of 180 s, 365 day rows`);
+console.log(`smoke: ok one-year 1-min line-line log (525600 rows) in ${Date.now() - started} ms, 1 sag of 180 s, 365 day rows, current unbalance 5% with 21900 low-load samples left out`);
 
 const bad = run(cli, [example]);
 if (bad.status !== 2 || !bad.stderr.includes('--nominal')) {

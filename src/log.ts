@@ -13,6 +13,10 @@ export interface VoltageLog {
   volts: number[][];
   /** Frequency per sample in Hz, or undefined when the log has no frequency column. null = empty cell. */
   freq?: (number | null)[];
+  /** Current column names as given (three, one per phase) when the log was read with current columns. */
+  currentChannels?: string[];
+  /** amps[sample] = per-phase currents in A, or null when any current cell of that row is empty. */
+  amps?: (number[] | null)[];
 }
 
 export interface LogOptions {
@@ -22,6 +26,8 @@ export interface LogOptions {
   voltColumns?: string[];
   /** Frequency column name. Used when present in the header (default "freq"). */
   freqColumn?: string;
+  /** Optional current column names, three (one per phase), for current unbalance. Not read by default. */
+  currentColumns?: string[];
 }
 
 const TIMESTAMP =
@@ -81,6 +87,24 @@ export function parseLog(text: string, options: LogOptions = {}): VoltageLog {
   if (new Set(voltColumns).size !== voltColumns.length) {
     throw new InputError('The voltage column names must be different.');
   }
+  const currentColumns = options.currentColumns;
+  if (currentColumns) {
+    if (currentColumns.length !== 3) {
+      throw new InputError(`Give three current columns (one per phase), not ${currentColumns.length}.`);
+    }
+    if (voltColumns.length !== 3) {
+      throw new InputError('Current columns need a three-phase log (three voltage columns).');
+    }
+    const lower = (names: string[]) => names.map((n) => n.toLowerCase());
+    if (new Set(lower(currentColumns)).size !== 3) {
+      throw new InputError('The current column names must be different.');
+    }
+    const taken = new Set(lower([...voltColumns, timeColumn, freqColumn]));
+    const clash = currentColumns.find((n) => taken.has(n.toLowerCase()));
+    if (clash !== undefined) {
+      throw new InputError(`Current column "${clash}" is also used as the time, voltage or frequency column.`);
+    }
+  }
   const rows = parseCsv(text);
   if (rows.length === 0) {
     throw new InputError('The log is empty.');
@@ -99,12 +123,20 @@ export function parseLog(text: string, options: LogOptions = {}): VoltageLog {
     return i;
   });
   const freqIdx = index(freqColumn);
+  const currentIdx = currentColumns?.map((name) => {
+    const i = index(name);
+    if (i < 0) {
+      throw new InputError(`The header has no current column "${name}" (header: ${header.join(',')}).`);
+    }
+    return i;
+  });
   const log: VoltageLog = {
     channels: voltIdx.map((i) => header[i]),
     timestamps: [],
     times: [],
     volts: [],
     freq: freqIdx >= 0 ? [] : undefined,
+    ...(currentIdx ? { currentChannels: currentIdx.map((i) => header[i]), amps: [] } : {}),
   };
   let zoned: boolean | undefined;
   for (let r = 1; r < rows.length; r++) {
@@ -136,6 +168,11 @@ export function parseLog(text: string, options: LogOptions = {}): VoltageLog {
     if (log.freq) {
       const cell = row[freqIdx].trim();
       log.freq.push(cell === '' ? null : measurement(cell, header[freqIdx], line));
+    }
+    if (currentIdx && log.amps) {
+      // Non-empty cells are always checked; a row with any empty current cell has no current sample.
+      const amps = currentIdx.map((i) => (row[i].trim() === '' ? null : measurement(row[i], header[i], line)));
+      log.amps.push(amps.some((x) => x === null) ? null : (amps as number[]));
     }
   }
   if (log.times.length === 0) {

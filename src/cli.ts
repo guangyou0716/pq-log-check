@@ -21,7 +21,7 @@ Events follow IEC 61000-4-30 style polyphase rules on the logged values: a sag s
 the sag threshold and ends when every channel is back at threshold + hysteresis; swells mirror this; an
 interruption starts when every channel is below the interruption threshold and ends when any channel is back at
 threshold + hysteresis. A log of 1-minute RMS values can miss short events, and durations are +/- one interval.
-Unbalance leaves out samples taken while an event was in progress.
+Unbalance leaves out samples taken while an event was in progress; current unbalance also leaves out low-load samples.
 
 Options:
   --nominal <V>           nominal voltage (required); line-neutral unless --line-to-line
@@ -29,6 +29,9 @@ Options:
   --columns <a,b,c>       voltage column names (default v1,v2,v3; give one name for single phase)
   --time-column <name>    timestamp column (default timestamp)
   --freq-column <name>    frequency column, used when present (default freq)
+  --current-columns <a,b,c>  three current columns (A): adds current unbalance (three phase only)
+  --current-min <A>       current unbalance leaves out samples with average current below this (default 0)
+  --current-unbalance-limit <pct>  limit for the 95th percentile of current unbalance (default none: report only)
   --sag <pct>             sag threshold, % of nominal (default 90)
   --swell <pct>           swell threshold, % of nominal (default 110)
   --interruption <pct>    interruption threshold, % of nominal (default 10)
@@ -43,7 +46,8 @@ Options:
   -h, --help              show this help
 
 The defaults are common values, not a compliance verdict: set the limits that apply to your supply.
-Exit codes: 0 no findings, 1 findings (any event, unbalance over limit, frequency outside band), 2 input error.
+Exit codes: 0 no findings, 1 findings (any event, unbalance or current unbalance over its limit, frequency outside
+band), 2 input error.
 `;
 
 function number(text: string | undefined, flag: string): number | undefined {
@@ -68,6 +72,9 @@ export function main(argv: string[]): number {
         columns: { type: 'string' },
         'time-column': { type: 'string' },
         'freq-column': { type: 'string' },
+        'current-columns': { type: 'string' },
+        'current-min': { type: 'string' },
+        'current-unbalance-limit': { type: 'string' },
         sag: { type: 'string' },
         swell: { type: 'string' },
         interruption: { type: 'string' },
@@ -96,6 +103,9 @@ export function main(argv: string[]): number {
     if (nominal === undefined) {
       throw new InputError('--nominal <volts> is required (for example --nominal 230).');
     }
+    if (!values['current-columns'] && (values['current-min'] !== undefined || values['current-unbalance-limit'] !== undefined)) {
+      throw new InputError('--current-min and --current-unbalance-limit need --current-columns.');
+    }
     let text: string;
     try {
       text = readFileSync(positionals[0], 'utf8');
@@ -106,6 +116,7 @@ export function main(argv: string[]): number {
       voltColumns: values.columns?.split(',').map((c) => c.trim()),
       timeColumn: values['time-column'],
       freqColumn: values['freq-column'],
+      currentColumns: values['current-columns']?.split(',').map((c) => c.trim()),
     });
     const report = analyze(log, {
       nominal,
@@ -119,6 +130,8 @@ export function main(argv: string[]): number {
       unbalanceLimitPct: number(values['unbalance-limit'], '--unbalance-limit'),
       freqNominal: number(values['freq-nominal'], '--freq-nominal'),
       freqToleranceHz: number(values['freq-tolerance'], '--freq-tolerance'),
+      currentMinA: number(values['current-min'], '--current-min'),
+      currentUnbalanceLimitPct: number(values['current-unbalance-limit'], '--current-unbalance-limit'),
     });
     process.stdout.write(values.json ? jsonReport(report) : values.md ? markdownReport(report) : textReport(report));
     return report.findings.length ? 1 : 0;

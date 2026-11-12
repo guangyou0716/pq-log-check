@@ -24,6 +24,10 @@ export interface Settings {
   freqNominal?: number;
   /** Allowed frequency deviation in Hz (default 1). */
   freqToleranceHz?: number;
+  /** Current unbalance: leave out samples whose average phase current is below this (A, default 0 = only zero load). */
+  currentMinA?: number;
+  /** Current unbalance limit in % for the 95th percentile; null (default) = report only, no finding. */
+  currentUnbalanceLimitPct?: number | null;
 }
 
 export type EventType = 'sag' | 'swell' | 'interruption';
@@ -67,6 +71,36 @@ export interface UnbalanceStats {
   maxAt: string;
   limitPct: number;
   samplesAboveLimit: number;
+  overLimit: boolean;
+}
+
+export interface CurrentChannelStats {
+  channel: string;
+  min: number;
+  mean: number;
+  max: number;
+}
+
+export interface CurrentUnbalanceStats {
+  method: 'max deviation from average current';
+  /** Per-phase current over all rows with all three currents present. */
+  channels: CurrentChannelStats[];
+  /** Samples used for unbalance. */
+  samples: number;
+  /** Rows with an empty current cell. */
+  missingSamples: number;
+  /** Samples left out because a sag, swell or interruption was in progress (flagged). */
+  flaggedSamples: number;
+  /** Samples left out because the average current was below currentMinA (or zero). */
+  lowLoadSamples: number;
+  minAverageA: number;
+  mean: number;
+  p95: number;
+  max: number;
+  maxAt: string;
+  /** null = no limit given (report only). */
+  limitPct: number | null;
+  samplesAboveLimit: number | null;
   overLimit: boolean;
 }
 
@@ -129,6 +163,8 @@ export interface Report {
   durationBuckets: Record<EventType, DurationBuckets>;
   channels: ChannelStats[];
   unbalance: UnbalanceStats | null;
+  /** Current unbalance; null when the log was read without current columns. */
+  current: CurrentUnbalanceStats | null;
   frequency: FrequencyStats | null;
   /** One row per calendar date in the log, in log order. */
   days: DaySummary[];
@@ -153,6 +189,8 @@ export function resolveSettings(settings: Settings): Required<Settings> {
     unbalanceLimitPct: settings.unbalanceLimitPct ?? 2,
     freqNominal: settings.freqNominal ?? 50,
     freqToleranceHz: settings.freqToleranceHz ?? 1,
+    currentMinA: settings.currentMinA ?? 0,
+    currentUnbalanceLimitPct: settings.currentUnbalanceLimitPct ?? null,
   };
   for (const [key, value] of Object.entries(s)) {
     if (typeof value === 'number' && !Number.isFinite(value)) {
@@ -177,6 +215,12 @@ export function resolveSettings(settings: Settings): Required<Settings> {
   }
   if (!(s.freqNominal > 0 && s.freqToleranceHz >= 0)) {
     throw new InputError('Nominal frequency must be > 0 Hz and the tolerance >= 0 Hz.');
+  }
+  if (!(s.currentMinA >= 0)) {
+    throw new InputError('The minimum average current must be >= 0 A.');
+  }
+  if (s.currentUnbalanceLimitPct !== null && !(s.currentUnbalanceLimitPct >= 0)) {
+    throw new InputError('The current unbalance limit must be >= 0 %.');
   }
   return s;
 }
@@ -415,6 +459,8 @@ export function analyze(log: VoltageLog, input: Settings): Report {
     };
   }
 
+  const current = log.amps && log.currentChannels ? currentUnbalance(log.amps, log.currentChannels, log.timestamps, flagged, s) : null;
+
   const days = summarizeDays(log, s, found, flagged, bandLow, bandHigh);
 
   const eventCounts = {
@@ -429,6 +475,9 @@ export function analyze(log: VoltageLog, input: Settings): Report {
   if (eventCounts.swell) findings.push(`${eventCounts.swell} swell(s)`);
   if (unbalance?.overLimit) {
     findings.push(`unbalance 95th percentile ${unbalance.p95}% > ${unbalance.limitPct}%`);
+  }
+  if (current?.overLimit) {
+    findings.push(`current unbalance 95th percentile ${current.p95}% > ${current.limitPct}%`);
   }
   if (frequency?.samplesOutside) {
     findings.push(`${frequency.samplesOutside} frequency sample(s) outside ${frequency.low}-${frequency.high} Hz`);
@@ -457,6 +506,7 @@ export function analyze(log: VoltageLog, input: Settings): Report {
     durationBuckets: bucketDurations(events),
     channels,
     unbalance,
+    current,
     frequency,
     days,
     findings,
@@ -543,4 +593,76 @@ export function bucketDurations(events: PqEvent[]): Record<EventType, DurationBu
     if (e.end === null) b.open++;
   }
   return out;
+}
+
+/** Current unbalance per sample: largest deviation of a phase current from the average, over the average (%). */
+export function currentUnbalance(
+  amps: (number[] | null)[],
+  channels: string[],
+  timestamps: string[],
+  flagged: boolean[],
+  s: Required<Settings>,
+): CurrentUnbalanceStats {
+  const k = channels.length;
+  const min = new Array<number>(k).fill(Infinity);
+  const max = new Array<number>(k).fill(-Infinity);
+  const sum = new Array<number>(k).fill(0);
+  let present = 0;
+  let missingSamples = 0;
+  let flaggedSamples = 0;
+  let lowLoadSamples = 0;
+  const values: number[] = [];
+  let maxValue = -1;
+  let maxAt = '';
+  amps.forEach((row, i) => {
+    if (row === null) {
+      missingSamples++;
+      return;
+    }
+    present++;
+    row.forEach((x, c) => {
+      if (x < min[c]) min[c] = x;
+      if (x > max[c]) max[c] = x;
+      sum[c] += x;
+    });
+    if (flagged[i]) {
+      flaggedSamples++;
+      return;
+    }
+    const avg = row.reduce((t, x) => t + x, 0) / row.length;
+    if (avg === 0 || avg < s.currentMinA) {
+      lowLoadSamples++;
+      return;
+    }
+    const u = (Math.max(...row.map((x) => Math.abs(x - avg))) / avg) * 100;
+    values.push(u);
+    if (u > maxValue) {
+      maxValue = u;
+      maxAt = timestamps[i];
+    }
+  });
+  const sorted = [...values].sort((x, y) => x - y);
+  const p95 = sorted.length ? percentile(sorted, 95) : 0;
+  const limit = s.currentUnbalanceLimitPct;
+  return {
+    method: 'max deviation from average current',
+    channels: channels.map((channel, c) => ({
+      channel,
+      min: present ? round(min[c]) : 0,
+      mean: present ? round(sum[c] / present) : 0,
+      max: present ? round(max[c]) : 0,
+    })),
+    samples: values.length,
+    missingSamples,
+    flaggedSamples,
+    lowLoadSamples,
+    minAverageA: s.currentMinA,
+    mean: values.length ? round(values.reduce((x, y) => x + y, 0) / values.length) : 0,
+    p95: round(p95),
+    max: values.length ? round(maxValue) : 0,
+    maxAt,
+    limitPct: limit,
+    samplesAboveLimit: limit === null ? null : values.filter((u) => u > limit).length,
+    overLimit: limit !== null && values.length > 0 && p95 > limit,
+  };
 }
