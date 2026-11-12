@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyze, negativeSequenceUnbalance, nemaUnbalance, resolveSettings } from '../src/analyze.js';
+import { analyze, bucketDurations, negativeSequenceUnbalance, nemaUnbalance, resolveSettings } from '../src/analyze.js';
 import { makeLog, ok } from './helpers.js';
 
 const s = { nominal: 230 };
@@ -229,5 +229,32 @@ describe('per-day summary', () => {
     expect(allFlagged.days.map((d) => d.unbalanceP95)).toEqual([null, 0]);
     const single = analyze(makeLog([[230], [230]], { stepS: 86400 }), s);
     expect(single.days.map((d) => [d.date, d.unbalanceP95])).toEqual([['2026-01-01', null], ['2026-01-02', null]]);
+  });
+});
+
+describe('event duration buckets', () => {
+  const ev = (type: 'sag' | 'swell' | 'interruption', durationS: number, end: string | null = 'x') => ({
+    type, start: 's', end, durationS, extremeV: 0, extremePct: 0, channel: 'v', samples: 1, spansGap: false,
+  });
+
+  it('buckets at the 1-minute and 10-minute edges (lower edge inclusive) and counts open events', () => {
+    const b = bucketDurations([
+      ev('sag', 0), ev('sag', 59.999), ev('sag', 60), ev('sag', 599.999), ev('sag', 600), ev('sag', 3600, null),
+      ev('swell', 120, null), ev('interruption', 30),
+    ]);
+    expect(b.sag).toEqual({ under1Min: 2, from1To10Min: 2, atLeast10Min: 2, open: 1 });
+    expect(b.swell).toEqual({ under1Min: 0, from1To10Min: 1, atLeast10Min: 0, open: 1 });
+    expect(b.interruption).toEqual({ under1Min: 1, from1To10Min: 0, atLeast10Min: 0, open: 0 });
+  });
+
+  it('report buckets add up to the event counts', () => {
+    // 1-min log: a 3-min sag, a 15-min sag, an open swell of 1 min
+    const rows = [ok, [200, 230, 230], [200, 230, 230], [200, 230, 230], ok,
+      ...Array.from({ length: 15 }, () => [230, 200, 230]), ok, ok, [260, 230, 230], [260, 230, 230]];
+    const r = analyze(makeLog(rows), s);
+    expect(r.eventCounts).toMatchObject({ sag: 2, swell: 1, interruption: 0 });
+    expect(r.durationBuckets.sag).toEqual({ under1Min: 0, from1To10Min: 1, atLeast10Min: 1, open: 0 });
+    expect(r.durationBuckets.swell).toEqual({ under1Min: 0, from1To10Min: 1, atLeast10Min: 0, open: 1 });
+    expect(r.durationBuckets.interruption).toEqual({ under1Min: 0, from1To10Min: 0, atLeast10Min: 0, open: 0 });
   });
 });

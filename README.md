@@ -95,6 +95,11 @@ IEC 61000-4-30):
 The 95th percentile is nearest-rank. Note that supply standards usually state unbalance limits on 10-minute
 aggregates; with another logging interval the figure is indicative.
 
+**Event durations** count each event type in three buckets: shorter than 1 minute, 1 to under 10 minutes, and
+10 minutes or longer (`durationBuckets` in JSON; the text and Markdown reports show the table when there are events).
+An event still open at the end of the log is counted by its duration so far and also in the `open` column.
+Durations come from logged samples, so they are accurate to about one logging interval.
+
 **Voltage per channel** statistics use all samples, including events.
 
 **Per day** rows use the calendar date as written in the timestamps (the logger's local date, also for timestamps
