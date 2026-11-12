@@ -56,6 +56,31 @@ describe('cli', () => {
     expect(main([log, '--nominal', '230', '--columns', 'L1', '--time-column', 'time', '--sag', '95', '--hysteresis', '1'])).toBe(1);
   });
 
+  it('per-day table in text and Markdown only when the log spans more than one date', () => {
+    expect(main([example, '--nominal', '230'])).toBe(1);
+    expect(out).not.toContain('Per day');
+    out = '';
+    const log = tmp(
+      'days.csv',
+      'timestamp,v1,v2,v3,freq\n' +
+        '2026-01-01T23:00:00+08:00,230,230,230,50\n2026-01-01T23:30:00+08:00,230,200,230,50\n' +
+        '2026-01-02T00:00:00+08:00,230,230,230,52\n2026-01-02T00:30:00+08:00,230,230,230,50\n',
+    );
+    expect(main([log, '--nominal', '230'])).toBe(1);
+    expect(out).toContain('Per day (events counted on the day they start):');
+    expect(out).toMatch(/Date {8}Samples {2}Interr\. {2}Sags {2}Swells {2}Min V {2}Max V {2}In band {2}Unbal\. p95 {2}Freq out/);
+    // dates are the logger's local dates as written, not UTC (23:30+08:00 is 15:30 UTC the same day)
+    expect(out).toMatch(/2026-01-01 +2 +0 +1 +0 +200 +230 +83\.33% +0% +0/);
+    expect(out).toMatch(/2026-01-02 +2 +0 +0 +0 +230 +230 +100% +0% +1/);
+    out = '';
+    expect(main([log, '--nominal', '230', '--md'])).toBe(1);
+    expect(out).toContain('| Date | Samples | Interr. | Sags | Swells | Min V | Max V | In band | Unbal. p95 | Freq out |');
+    expect(out).toContain('| 2026-01-02 | 2 | 0 | 0 | 0 | 230 | 230 | 100% | 0% | 1 |');
+    out = '';
+    expect(main([log, '--nominal', '230', '--json'])).toBe(1);
+    expect(JSON.parse(out).days.map((d: { date: string }) => d.date)).toEqual(['2026-01-01', '2026-01-02']);
+  });
+
   it('input errors exit 2 with a message', () => {
     const cases: [string[], RegExp][] = [
       [[], /Give a log CSV/],

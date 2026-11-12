@@ -197,3 +197,37 @@ describe('channel stats, frequency, settings', () => {
     expect(resolveSettings({ nominal: 230 })).toMatchObject({ sagPct: 90, swellPct: 110, interruptPct: 10, hysteresisPct: 2 });
   });
 });
+
+describe('per-day summary', () => {
+  // 6-hour steps: 2026-01-01 00/06/12/18, 2026-01-02 00/06/12/18
+  const rows = [ok, [230, 200, 230], ok, ok, [260, 230, 230], ok, [0, 0, 0], ok];
+  const freq = [50, 50, 50, 50, 50, 52, null, 50];
+
+  it('one row per date with events counted on their start day', () => {
+    const r = analyze(makeLog(rows, { stepS: 6 * 3600, freq }), s);
+    expect(r.days).toEqual([
+      { date: '2026-01-01', samples: 4, sag: 1, swell: 0, interruption: 0, minV: 200, maxV: 230, inBandPct: 91.67, unbalanceP95: 0, freqOutside: 0 },
+      { date: '2026-01-02', samples: 4, sag: 1, swell: 1, interruption: 1, minV: 0, maxV: 260, inBandPct: 66.67, unbalanceP95: 0, freqOutside: 1 },
+    ]);
+    // the day rows add up to the whole-log counts
+    const sum = (k: 'sag' | 'swell' | 'interruption') => r.days.reduce((t, d) => t + d[k], 0);
+    expect({ sag: sum('sag'), swell: sum('swell'), interruption: sum('interruption') }).toMatchObject({
+      sag: r.eventCounts.sag,
+      swell: r.eventCounts.swell,
+      interruption: r.eventCounts.interruption,
+    });
+  });
+
+  it('daily unbalance p95 leaves out flagged samples; null for single phase; freqOutside null without a frequency column', () => {
+    const r = analyze(makeLog([[230, 230, 220], [230, 230, 220], [230, 230, 230]], { stepS: 12 * 3600 }), s);
+    expect(r.days.map((d) => d.unbalanceP95)).toEqual([2.941, 0]);
+    expect(r.days.every((d) => d.freqOutside === null)).toBe(true);
+    const flaggedOnly = analyze(makeLog([[230, 230, 220], [200, 230, 230], [230, 230, 230]], { stepS: 12 * 3600 }), s);
+    // the sag sample (NEMA 6.9 %) is flagged and left out of its day's p95
+    expect(flaggedOnly.days[0]).toMatchObject({ date: '2026-01-01', samples: 2, sag: 1, unbalanceP95: 2.941 });
+    const allFlagged = analyze(makeLog([[200, 230, 230], ok], { stepS: 86400 }), s);
+    expect(allFlagged.days.map((d) => d.unbalanceP95)).toEqual([null, 0]);
+    const single = analyze(makeLog([[230], [230]], { stepS: 86400 }), s);
+    expect(single.days.map((d) => [d.date, d.unbalanceP95])).toEqual([['2026-01-01', null], ['2026-01-02', null]]);
+  });
+});

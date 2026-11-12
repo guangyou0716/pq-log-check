@@ -41,10 +41,11 @@ writeFileSync(big, `${rows.join('\n')}\n`);
 const started = Date.now();
 const res = run(cli, [big, '--nominal', '400', '--line-to-line', '--columns', 'vab,vbc,vca', '--json']);
 const data = res.stdout ? JSON.parse(res.stdout) : {};
-if (res.status !== 1 || data.events?.length !== 1 || data.events[0].durationS !== 180 || data.unbalance?.overLimit !== false || data.frequency?.max !== 50.04) {
+if (res.status !== 1 || data.events?.length !== 1 || data.events[0].durationS !== 180 || data.unbalance?.overLimit !== false || data.frequency?.max !== 50.04 ||
+  data.days?.length !== 365 || data.days.reduce((t, d) => t + d.samples, 0) !== 525600 || data.days.filter((d) => d.sag).length !== 1) {
   fail(`year log: status ${res.status} ${JSON.stringify(data.eventCounts)} ${res.stderr}`);
 }
-console.log(`smoke: ok one-year 1-min line-line log (525600 rows) in ${Date.now() - started} ms, 1 sag of 180 s`);
+console.log(`smoke: ok one-year 1-min line-line log (525600 rows) in ${Date.now() - started} ms, 1 sag of 180 s, 365 day rows`);
 
 const bad = run(cli, [example]);
 if (bad.status !== 2 || !bad.stderr.includes('--nominal')) {

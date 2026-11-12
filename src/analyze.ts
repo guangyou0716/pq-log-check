@@ -87,6 +87,25 @@ export interface Gap {
   seconds: number;
 }
 
+export interface DaySummary {
+  /** Calendar date as written in the log's timestamps (the logger's local date). */
+  date: string;
+  samples: number;
+  /** Events counted on the day they start. */
+  sag: number;
+  swell: number;
+  interruption: number;
+  /** Lowest and highest value on any channel that day. */
+  minV: number;
+  maxV: number;
+  /** Share of channel values inside the voltage band, all channels together. */
+  inBandPct: number;
+  /** 95th percentile of unbalance over that day's unflagged samples; null for single phase or no unflagged samples. */
+  unbalanceP95: number | null;
+  /** Frequency samples outside the band that day; null when the log has no frequency column. */
+  freqOutside: number | null;
+}
+
 export interface Report {
   settings: Required<Settings>;
   thresholdsV: { sag: number; swell: number; interruption: number; hysteresis: number; bandLow: number; bandHigh: number };
@@ -97,6 +116,8 @@ export interface Report {
   channels: ChannelStats[];
   unbalance: UnbalanceStats | null;
   frequency: FrequencyStats | null;
+  /** One row per calendar date in the log, in log order. */
+  days: DaySummary[];
   findings: string[];
 }
 
@@ -380,6 +401,8 @@ export function analyze(log: VoltageLog, input: Settings): Report {
     };
   }
 
+  const days = summarizeDays(log, s, found, flagged, bandLow, bandHigh);
+
   const eventCounts = {
     sag: events.filter((e) => e.type === 'sag').length,
     swell: events.filter((e) => e.type === 'swell').length,
@@ -420,6 +443,76 @@ export function analyze(log: VoltageLog, input: Settings): Report {
     channels,
     unbalance,
     frequency,
+    days,
     findings,
   };
+}
+
+function summarizeDays(
+  log: VoltageLog,
+  s: Required<Settings>,
+  found: { event: PqEvent; startIdx: number }[],
+  flagged: boolean[],
+  bandLow: number,
+  bandHigh: number,
+): DaySummary[] {
+  interface Acc { row: DaySummary; inBand: number; unbalance: number[] }
+  const byDate = new Map<string, Acc>();
+  const dateOf = (i: number) => log.timestamps[i].slice(0, 10);
+  const accFor = (date: string) => {
+    let acc = byDate.get(date);
+    if (!acc) {
+      acc = {
+        row: {
+          date,
+          samples: 0,
+          sag: 0,
+          swell: 0,
+          interruption: 0,
+          minV: Infinity,
+          maxV: -Infinity,
+          inBandPct: 0,
+          unbalanceP95: null,
+          freqOutside: log.freq ? 0 : null,
+        },
+        inBand: 0,
+        unbalance: [],
+      };
+      byDate.set(date, acc);
+    }
+    return acc;
+  };
+  const freqLow = s.freqNominal - s.freqToleranceHz;
+  const freqHigh = s.freqNominal + s.freqToleranceHz;
+  for (let i = 0; i < log.times.length; i++) {
+    const acc = accFor(dateOf(i));
+    const v = log.volts[i];
+    acc.row.samples++;
+    for (const x of v) {
+      if (x < acc.row.minV) acc.row.minV = x;
+      if (x > acc.row.maxV) acc.row.maxV = x;
+      if (x >= bandLow && x <= bandHigh) acc.inBand++;
+    }
+    if (v.length === 3 && !flagged[i]) {
+      const u = s.lineToLine ? negativeSequenceUnbalance(v[0], v[1], v[2]) : nemaUnbalance(v);
+      if (u !== null) acc.unbalance.push(u);
+    }
+    const f = log.freq?.[i];
+    if (f !== undefined && f !== null && (f < freqLow || f > freqHigh) && acc.row.freqOutside !== null) {
+      acc.row.freqOutside++;
+    }
+  }
+  for (const { event, startIdx } of found) {
+    accFor(dateOf(startIdx)).row[event.type]++;
+  }
+  return [...byDate.values()].map(({ row, inBand, unbalance }) => {
+    const sorted = unbalance.sort((x, y) => x - y);
+    return {
+      ...row,
+      minV: round(row.minV),
+      maxV: round(row.maxV),
+      inBandPct: round((inBand / (row.samples * log.channels.length)) * 100, 2),
+      unbalanceP95: sorted.length ? round(percentile(sorted, 95)) : null,
+    };
+  });
 }

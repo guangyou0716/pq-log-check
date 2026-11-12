@@ -5,7 +5,9 @@ Offline CLI that turns an RMS voltage log (CSV) into a power-quality report:
 - **events**: voltage sags (dips), swells and supply interruptions, with start, end, duration, depth and channel;
 - **unbalance**: mean, 95th percentile and max, with a limit check;
 - **voltage per channel**: min / mean / max and the share of samples inside a voltage band;
-- **logging gaps** and, when the log has a frequency column, **frequency** range and samples outside a band.
+- **logging gaps** and, when the log has a frequency column, **frequency** range and samples outside a band;
+- **per day**: when the log covers more than one date, a table with samples, events, min / max voltage, share in
+  band, unbalance 95th percentile and frequency samples outside the band for each date.
 
 It is meant for the logs you get from a temporary power monitor, a generator set controller or a smart meter
 with 1-minute (or any interval) RMS logging, when you would otherwise build the report in a spreadsheet.
@@ -94,6 +96,12 @@ The 95th percentile is nearest-rank. Note that supply standards usually state un
 aggregates; with another logging interval the figure is indicative.
 
 **Voltage per channel** statistics use all samples, including events.
+
+**Per day** rows use the calendar date as written in the timestamps (the logger's local date, also for timestamps
+with a zone offset). An event is counted on the day it starts, so an event across midnight appears once. The daily
+unbalance 95th percentile uses that day's unflagged samples (`-` when there are none); min / max and the share in
+band cover all channels. The text and Markdown reports show the table only for logs that span more than one date;
+the JSON report always has `days`.
 
 ## Development
 
