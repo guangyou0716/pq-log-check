@@ -258,3 +258,46 @@ describe('event duration buckets', () => {
     expect(r.durationBuckets.interruption).toEqual({ under1Min: 0, from1To10Min: 0, atLeast10Min: 0, open: 0 });
   });
 });
+
+describe('current unbalance', () => {
+  const withAmps = () => {
+    const log = makeLog([ok, ok, ok, ok, [230, 200, 230], ok]);
+    log.currentChannels = ['i1', 'i2', 'i3'];
+    log.amps = [[100, 100, 100], [110, 100, 90], [0, 0, 0], null, [200, 100, 100], [12, 10, 8]];
+    return log;
+  };
+
+  it('max deviation from average, leaving out flagged, zero-load and empty rows; report only without a limit', () => {
+    const r = analyze(withAmps(), s);
+    expect(r.events).toHaveLength(1);
+    expect(r.current).toMatchObject({
+      samples: 3,
+      missingSamples: 1,
+      flaggedSamples: 1,
+      lowLoadSamples: 1,
+      mean: 10,
+      p95: 20,
+      max: 20,
+      maxAt: '2026-01-01 00:05:00',
+      limitPct: null,
+      samplesAboveLimit: null,
+      overLimit: false,
+    });
+    expect(r.current?.channels[0]).toEqual({ channel: 'i1', min: 0, mean: 84.4, max: 200 });
+    expect(r.findings.some((f) => f.startsWith('current'))).toBe(false);
+  });
+
+  it('minimum average current and a limit make it a finding', () => {
+    const r = analyze(withAmps(), { ...s, currentMinA: 50, currentUnbalanceLimitPct: 5 });
+    expect(r.current).toMatchObject({ samples: 2, lowLoadSamples: 2, p95: 10, samplesAboveLimit: 1, overLimit: true });
+    expect(r.findings).toContain('current unbalance 95th percentile 10% > 5%');
+    const ok15 = analyze(withAmps(), { ...s, currentMinA: 50, currentUnbalanceLimitPct: 15 });
+    expect(ok15.current).toMatchObject({ samplesAboveLimit: 0, overLimit: false });
+  });
+
+  it('is null without current columns and rejects bad settings', () => {
+    expect(analyze(makeLog([ok]), s).current).toBeNull();
+    expect(() => resolveSettings({ ...s, currentMinA: -1 })).toThrow(/minimum average current/);
+    expect(() => resolveSettings({ ...s, currentUnbalanceLimitPct: -1 })).toThrow(/current unbalance limit/);
+  });
+});

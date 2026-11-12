@@ -111,4 +111,24 @@ describe('cli', () => {
     expect(main(['--help'])).toBe(0);
     expect(out).toContain('Usage: pq-log-check');
   });
+
+  it('current unbalance from --current-columns in text, Markdown and JSON', () => {
+    const rows = ['timestamp,v1,v2,v3,i1,i2,i3'];
+    for (let m = 0; m < 10; m++) rows.push(`2026-01-01 00:0${m},230,230,230,${m < 5 ? '100,100,100' : '110,100,90'}`);
+    const log = tmp('amps.csv', `${rows.join('\n')}\n`);
+    expect(main([log, '--nominal', '230', '--current-columns', 'i1,i2,i3'])).toBe(0);
+    expect(out).toContain('Current unbalance (max deviation from average current), 10 samples; left out: 0 flagged, 0 low load');
+    expect(out).toContain('i1: min 100 A, mean 105 A, max 110 A');
+    expect(out).toContain('95th percentile 10%, max 10% (2026-01-01 00:05); no limit given (report only)');
+    out = '';
+    expect(main([log, '--nominal', '230', '--current-columns', 'i1,i2,i3', '--current-unbalance-limit', '8', '--md'])).toBe(1);
+    expect(out).toContain('## Current unbalance');
+    expect(out).toContain('| 5% | 10% | 10% | 8% | 5 | over limit |');
+    expect(out).toContain('- current unbalance 95th percentile 10% > 8%');
+    out = '';
+    expect(main([log, '--nominal', '230', '--current-columns', 'i1,i2,i3', '--current-min', '200', '--json'])).toBe(0);
+    expect(JSON.parse(out).current).toMatchObject({ samples: 0, lowLoadSamples: 10, minAverageA: 200 });
+    expect(main([log, '--nominal', '230', '--current-min', '5'])).toBe(2);
+    expect(err).toContain('need --current-columns');
+  });
 });

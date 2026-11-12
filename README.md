@@ -5,6 +5,8 @@ Offline CLI that turns an RMS voltage log (CSV) into a power-quality report:
 - **events**: voltage sags (dips), swells and supply interruptions, with start, end, duration, depth and channel;
 - **unbalance**: mean, 95th percentile and max, with a limit check;
 - **voltage per channel**: min / mean / max and the share of samples inside a voltage band;
+- **current unbalance** (optional): with three current columns, per-phase current and the current unbalance
+  mean / 95th percentile / max, with an optional limit;
 - **logging gaps** and, when the log has a frequency column, **frequency** range and samples outside a band;
 - **per day**: when the log covers more than one date, a table with samples, events, min / max voltage, share in
   band, unbalance 95th percentile and frequency samples outside the band for each date.
@@ -41,7 +43,9 @@ Unbalance (NEMA phase-voltage unbalance (max deviation from average)), 1420 samp
 
 A header row with a timestamp column and one (single phase) or three (three phase) voltage columns, default
 `timestamp,v1,v2,v3`, plus an optional `freq` column in Hz (empty cells allowed). Column names are matched without
-case and can be changed with `--columns`, `--time-column` and `--freq-column`. Timestamps are ISO 8601
+case and can be changed with `--columns`, `--time-column` and `--freq-column`. Three-phase logs can also carry
+per-phase currents in A, named with `--current-columns` (not read unless given; a row with an empty current cell
+counts as missing for current only). Timestamps are ISO 8601
 (`2026-11-12 14:05:00`, `2026-11-12T14:05:00+08:00`), in time order, all with or all without a zone offset.
 Any problem is reported with its row number (exit 2).
 
@@ -58,12 +62,15 @@ Any problem is reported with its row number (exit 2).
 | `--band-low <pct>` / `--band-high <pct>` | 10 / 10 | voltage band, % below / above nominal |
 | `--unbalance-limit <pct>` | 2 | limit for the 95th percentile of unbalance |
 | `--freq-nominal <Hz>` / `--freq-tolerance <Hz>` | 50 / 1 | frequency band |
+| `--current-columns <a,b,c>` | none | three current columns (A); adds current unbalance |
+| `--current-min <A>` | 0 | current unbalance leaves out samples with average current below this |
+| `--current-unbalance-limit <pct>` | none | limit for the 95th percentile of current unbalance; without it current unbalance is report only |
 
 The defaults are common values, **not a compliance verdict**: set the limits that apply to your supply and contract.
 The tool ships no standard limit tables.
 
-Exit codes: `0` no findings, `1` findings (any event, unbalance 95th percentile over the limit, frequency outside the
-band), `2` input error.
+Exit codes: `0` no findings, `1` findings (any event, unbalance 95th percentile over the limit, current unbalance
+95th percentile over `--current-unbalance-limit` when given, frequency outside the band), `2` input error.
 
 ## How it works
 
@@ -94,6 +101,13 @@ IEC 61000-4-30):
 
 The 95th percentile is nearest-rank. Note that supply standards usually state unbalance limits on 10-minute
 aggregates; with another logging interval the figure is indicative.
+
+**Current unbalance** (with `--current-columns`) is the largest deviation of a phase current from the average of
+the three, over the average, per sample (the same max-deviation form as the NEMA voltage figure). It leaves out
+flagged samples (as for voltage unbalance), rows with an empty current cell, and low-load samples whose average
+current is zero or below `--current-min`: at light load a few amperes of single-phase load give large percentages
+that say little. Per-phase min / mean / max use every row with all three currents. There is no standard current
+unbalance limit, so it is a finding only when you give `--current-unbalance-limit`.
 
 **Event durations** count each event type in three buckets: shorter than 1 minute, 1 to under 10 minutes, and
 10 minutes or longer (`durationBuckets` in JSON; the text and Markdown reports show the table when there are events).
