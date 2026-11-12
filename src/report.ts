@@ -1,4 +1,4 @@
-import type { DaySummary, PqEvent, Report } from './analyze.js';
+import type { DaySummary, EventType, PqEvent, Report } from './analyze.js';
 
 const dur = (seconds: number) => {
   if (seconds < 60) return `${seconds} s`;
@@ -49,6 +49,17 @@ const dayHeads = (r: Report) => [
   ...(r.frequency ? ['Freq out'] : []),
 ];
 
+const bucketTypes: EventType[] = ['interruption', 'sag', 'swell'];
+const bucketHeads = ['Type', '< 1 min', '1-10 min', '>= 10 min', 'Open'];
+const bucketRows = (r: Report) =>
+  bucketTypes
+    .filter((t) => r.eventCounts[t] > 0)
+    .map((t) => {
+      const b = r.durationBuckets[t];
+      return [t, String(b.under1Min), String(b.from1To10Min), String(b.atLeast10Min), String(b.open)];
+    });
+const bucketNote = 'open events are counted by their duration so far';
+
 export function textReport(r: Report): string {
   const out = header(r);
   out.push('', `Events: ${r.eventCounts.interruption} interruption, ${r.eventCounts.sag} sag, ${r.eventCounts.swell} swell`);
@@ -58,6 +69,14 @@ export function textReport(r: Report): string {
       `  ${e.type.padEnd(12)} ${e.start} -> ${eventEnd(e)}  ${dur(e.durationS)}, ` +
         `${e.type === 'swell' ? 'max' : 'min'} ${e.extremeV} V (${e.extremePct}%) on ${e.channel}${notes ? `  [${notes}]` : ''}`,
     );
+  }
+  if (r.events.length) {
+    const rows = [bucketHeads, ...bucketRows(r)];
+    const widths = rows[0].map((_, k) => Math.max(...rows.map((row) => row[k].length)));
+    out.push('', `Event durations (${bucketNote}):`);
+    for (const row of rows) {
+      out.push(`  ${row.map((c, k) => (k === 0 ? c.padEnd(widths[k]) : c.padStart(widths[k]))).join('  ')}`);
+    }
   }
   out.push('', 'Voltage per channel (all samples):');
   for (const c of r.channels) {
@@ -111,6 +130,9 @@ export function markdownReport(r: Report): string {
           `${cell(e.channel)} | ${eventNotes(e)} |`,
       );
     }
+    out.push('', '### Event durations', '', 'Open events are counted by their duration so far.', '',
+      `| ${bucketHeads.join(' | ')} |`, `| ${bucketHeads.map(() => '---').join(' | ')} |`);
+    for (const row of bucketRows(r)) out.push(`| ${row.join(' | ')} |`);
   } else {
     out.push('None.');
   }

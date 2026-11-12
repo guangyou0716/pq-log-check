@@ -106,6 +106,18 @@ export interface DaySummary {
   freqOutside: number | null;
 }
 
+/** Event counts by duration. Open events (still running at the end of the log) use their duration so far. */
+export interface DurationBuckets {
+  /** Shorter than 1 minute. */
+  under1Min: number;
+  /** From 1 minute up to (not including) 10 minutes. */
+  from1To10Min: number;
+  /** 10 minutes or longer. */
+  atLeast10Min: number;
+  /** Of the above, events still open at the end of the log (real duration unknown, at least as long as counted). */
+  open: number;
+}
+
 export interface Report {
   settings: Required<Settings>;
   thresholdsV: { sag: number; swell: number; interruption: number; hysteresis: number; bandLow: number; bandHigh: number };
@@ -113,6 +125,8 @@ export interface Report {
   phases: number;
   events: PqEvent[];
   eventCounts: { sag: number; swell: number; interruption: number; sagWithInterruption: number };
+  /** Events per type bucketed by duration: < 1 min, 1-10 min, >= 10 min. */
+  durationBuckets: Record<EventType, DurationBuckets>;
   channels: ChannelStats[];
   unbalance: UnbalanceStats | null;
   frequency: FrequencyStats | null;
@@ -440,6 +454,7 @@ export function analyze(log: VoltageLog, input: Settings): Report {
     phases: log.channels.length,
     events,
     eventCounts,
+    durationBuckets: bucketDurations(events),
     channels,
     unbalance,
     frequency,
@@ -515,4 +530,17 @@ function summarizeDays(
       unbalanceP95: sorted.length ? round(percentile(sorted, 95)) : null,
     };
   });
+}
+
+export function bucketDurations(events: PqEvent[]): Record<EventType, DurationBuckets> {
+  const empty = (): DurationBuckets => ({ under1Min: 0, from1To10Min: 0, atLeast10Min: 0, open: 0 });
+  const out: Record<EventType, DurationBuckets> = { interruption: empty(), sag: empty(), swell: empty() };
+  for (const e of events) {
+    const b = out[e.type];
+    if (e.durationS < 60) b.under1Min++;
+    else if (e.durationS < 600) b.from1To10Min++;
+    else b.atLeast10Min++;
+    if (e.end === null) b.open++;
+  }
+  return out;
 }

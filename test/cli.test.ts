@@ -36,6 +36,9 @@ describe('cli', () => {
     expect(out).toContain('sag          2026-11-02 09:15:00 -> 2026-11-02 09:18:00  3 min, min 184 V (80%) on v2');
     expect(out).toContain('2026-11-02 02:59:00 -> 2026-11-02 03:10:00 (11 min)');
     expect(out).toContain('Findings: 1 interruption(s), 2 sag(s), 1 swell(s), 1 frequency sample(s) outside 49-51 Hz');
+    expect(out).toContain('Event durations (open events are counted by their duration so far):');
+    expect(out).toMatch(/Type {10}< 1 min {2}1-10 min {2}>= 10 min {2}Open/);
+    expect(out).toMatch(/\n {2}sag +0 +2 +0 +0\n/);
   });
 
   it('JSON and Markdown outputs', () => {
@@ -47,11 +50,15 @@ describe('cli', () => {
     expect(main([example, '--nominal', '230', '--md'])).toBe(1);
     expect(out).toContain('| interruption | 2026-11-02 14:00:00 | 2026-11-02 14:05:00 | 5 min | 0 V (0%) | v1 |  |');
     expect(out).toContain('## Logging gaps');
+    expect(out).toContain('| Type | < 1 min | 1-10 min | >= 10 min | Open |');
+    expect(out).toContain('| interruption | 0 | 1 | 0 | 0 |');
+    expect(data.durationBuckets.sag).toEqual({ under1Min: 0, from1To10Min: 2, atLeast10Min: 0, open: 0 });
   });
 
   it('exit 0 on a clean log, options change thresholds and columns', () => {
     const log = tmp('clean.csv', 'time,L1\n2026-01-01 00:00,230\n2026-01-01 00:01,216\n');
     expect(main([log, '--nominal', '230', '--columns', 'L1', '--time-column', 'time'])).toBe(0);
+    expect(out).not.toContain('Event durations');
     expect(out).toContain('Findings: none');
     expect(main([log, '--nominal', '230', '--columns', 'L1', '--time-column', 'time', '--sag', '95', '--hysteresis', '1'])).toBe(1);
   });
