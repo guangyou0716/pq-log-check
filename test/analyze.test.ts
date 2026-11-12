@@ -118,9 +118,15 @@ describe('unbalance', () => {
       const v1 = mag(add(ab, rot(bc, 120), rot(ca, 240)));
       const v2 = mag(add(ab, rot(bc, 240), rot(ca, 120)));
       const u = negativeSequenceUnbalance(mag(ab), mag(bc), mag(ca));
-      expect(u).toBeCloseTo((v2 / v1) * 100, 9);
+      expect(Math.abs((u as number) - (v2 / v1) * 100)).toBeLessThan(1e-9);
     }
     expect(negativeSequenceUnbalance(0, 0, 0)).toBeNull();
+    expect(negativeSequenceUnbalance(400, 400, 400)).toBe(0);
+    // textbook form agrees away from balance
+    const [x, y, z] = [410, 395, 402];
+    const beta = (x ** 4 + y ** 4 + z ** 4) / (x * x + y * y + z * z) ** 2;
+    const r = Math.sqrt(3 - 6 * beta);
+    expect(negativeSequenceUnbalance(x, y, z)).toBeCloseTo(Math.sqrt((1 - r) / (1 + r)) * 100, 6);
     expect(negativeSequenceUnbalance(400, 400, 0)).toBeCloseTo(100, 6);
   });
 

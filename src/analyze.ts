@@ -146,15 +146,22 @@ export function resolveSettings(settings: Settings): Required<Settings> {
   return s;
 }
 
-/** Negative-sequence unbalance u2 (%) from three line-line voltage magnitudes (exact, no angles needed). */
+/**
+ * Negative-sequence unbalance u2 (%) from three line-line voltage magnitudes (exact, no angles needed).
+ * Textbook form: beta = (a^4+b^4+c^4)/(a^2+b^2+c^2)^2, u2 = sqrt((1 - sqrt(3-6 beta)) / (1 + sqrt(3-6 beta))).
+ * Computed here via d = 6 beta - 2 = 2 * sum((a^2-b^2)^2) / (a^2+b^2+c^2)^2 and u2 = sqrt(d) / (1 + sqrt(1-d)),
+ * which is the same value without the cancellation in 1 - sqrt(...) near balance.
+ */
 export function negativeSequenceUnbalance(a: number, b: number, c: number): number | null {
-  const s2 = a * a + b * b + c * c;
+  const a2 = a * a;
+  const b2 = b * b;
+  const c2 = c * c;
+  const s2 = a2 + b2 + c2;
   if (s2 === 0) {
     return null;
   }
-  const beta = (a ** 4 + b ** 4 + c ** 4) / (s2 * s2);
-  const r = Math.sqrt(Math.max(0, 3 - 6 * beta));
-  return Math.sqrt((1 - r) / (1 + r)) * 100;
+  const d = (2 * ((a2 - b2) ** 2 + (b2 - c2) ** 2 + (c2 - a2) ** 2)) / (s2 * s2);
+  return (Math.sqrt(d) / (1 + Math.sqrt(Math.max(0, 1 - d)))) * 100;
 }
 
 /** NEMA phase-voltage unbalance (%): largest deviation from the average, over the average. */
